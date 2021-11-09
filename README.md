@@ -33,23 +33,21 @@ The `cdk.json` file inside `infrastructure` directory tells the CDK Toolkit how 
 
 ## Prerequisites
 
-- Make sure you have [AWS CDK](https://docs.aws.amazon.com/cdk/latest/guide/getting_started.html) installed and configured with an aws account you want to use.
+- Make sure you have [AWS CLI](https://aws.amazon.com/cli/) installed and configured with the aws account you want to use.
+- Make sure you have [AWS CDK](https://docs.aws.amazon.com/cdk/latest/guide/getting_started.html) installed and configured with the aws account you want to use.
 - Ensure you have [docker](https://docs.docker.com/get-docker/) installed and is up and running locally.
 
 ## Getting started
 
 ### Configuration
-The Orthanc CDK project comes with a set of pre-defined parameters, which you can view/change in `/infrastructure/bin/cdk.ts`.
-
+The CDK project comes with a set of feature flags to enable/disable certain features. You can find them in `/infrastructure/bin/cdk.ts`.
 ```Javascript
-// ********************************
-// Orthanc parameters
-// ********************************   
-const ENABLE_DICOM_S3_STORAGE = true;     // If true, use an S3 bucket as the DICOM image store
-const ORTHANC_USERNAME = "admin";         // Default Orthanc admin username
-const ORTHANC_PASSWORD = "_Admin1";       // Default Orthanc admin password
+const ENABLE_DICOM_S3_STORAGE = true;     // If true, use an S3 bucket as the DICOM image store, otherwise use EFS
+const ACCESS_LOGS_BUCKET_ARN = "";        // If provided, enables ALB access logs using the specified bucket ARN
+const ENABLE_MULTI_AZ = false;            // If true, uses multi-AZ deployment for RDS and ECS
+const ENABLE_RDS_BACKUP = false;          // If true, enables automatic backup for RDS
+const ENABLE_VPC_FLOW_LOGS = false;       // If true, enables VPC flow logs to CloudWatch
 ```
-> `You must change the default admin credentials for production environments!`
 
 ### Deployment
 
@@ -79,6 +77,22 @@ const ORTHANC_PASSWORD = "_Admin1";       // Default Orthanc admin password
     cdk deploy --all
 ```
 
+## Logging into Orthanc
+The CDK project automatically generates a password for the `admin` user on deployment.
+
+You can run the following command to retrieve the Orthanc credentials:
+```bash
+# Retieve Secret name from Cloudformation
+aws cloudformation describe-stacks --stack-name "Orthanc-ECSStack" | jq -r '.Stacks | .[] | .Outputs[] | select(.OutputKey | test(".*OrthancCredentialsName.*")) | .OutputValue'
+
+# Retrieve Secret from Secrets Manager
+# (replace {ORTHANC_SECRET_NAME} with the name of your secret)
+aws secretsmanager get-secret-value --secret-id {ORTHANC_SECRET_NAME} | jq -r ".SecretString"
+```
+You can run the following command to get the login page URL:
+```bash
+aws cloudformation describe-stacks --stack-name  "Orthanc-ECSStack" | jq -r '.Stacks | .[] | .Outputs[] | select(.OutputKey | test(".*OrthancURL.*")) | .OutputValue'  
+```
 
 ## Useful commands
 
@@ -90,8 +104,12 @@ const ORTHANC_PASSWORD = "_Admin1";       // Default Orthanc admin password
 
 Enjoy!
 
-## Security
+## Security considerations
 
+### TLS termination
+The solution supports TLS termination at the CloudFront distribution. However, the Application Load Balancer is listening on HTTP - which should be changed to an HTTPS listener (with a signed certificate) for production workloads. Please refer to the [documentation](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/create-https-listener.html) for guidance.
+
+## Found an issue? Anything to add?
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
 
 ## License

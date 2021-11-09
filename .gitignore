@@ -1,0 +1,15 @@
+*.js
+!jest.config.js
+*.d.ts
+node_modules
+
+.DS_Store
+
+appsec/*
+infrastructure/Orthanc-ECSStack/
+infrastructure/Orthanc-Storage/
+infrastructure/Orthanc-Network/
+
+# CDK asset staging directory
+.cdk.staging
+cdk.out

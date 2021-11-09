@@ -3,6 +3,12 @@
 *.d.ts
 node_modules
 
+appsec
+
+infrastucture/Orthanc-ECSStack
+infrastucture/Orthanc-Storage
+infrastucture/Orthanc-Network
+
 # CDK asset staging directory
 .cdk.staging
 cdk.out

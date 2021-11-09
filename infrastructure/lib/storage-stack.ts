@@ -6,24 +6,23 @@ import * as rds from '@aws-cdk/aws-rds';
 import * as s3 from '@aws-cdk/aws-s3';
 import * as kms from '@aws-cdk/aws-kms';
 import * as secretsmanager from '@aws-cdk/aws-secretsmanager';
-import { FileSystem, LifecyclePolicy, PerformanceMode, ThroughputMode } from "@aws-cdk/aws-efs";
+import { FileSystem, LifecyclePolicy, PerformanceMode, ThroughputMode, AccessPoint } from "@aws-cdk/aws-efs";
 
 export class StorageStack extends cdk.Stack {
 
-  readonly secret: secretsmanager.Secret;
+  readonly rdsSecret: secretsmanager.Secret;
   readonly fileSystem?: FileSystem;
   readonly rdsInstance: rds.DatabaseInstance;
   readonly orthancBucket?: s3.Bucket;
+  readonly efsAccessPoint?: AccessPoint;
 
   constructor(scope: cdk.Construct, id: string, props: StorageStackProps) {
     super(scope, id, props);
       // ********************************
       // DB Credentials (Secrets Manager)
       // ********************************
-      this.secret = new secretsmanager.Secret(this, 'Orthanc-RDSDatabaseSecret',{
+      this.rdsSecret = new secretsmanager.Secret(this, 'Orthanc-RDSDatabaseSecret',{
         generateSecretString: {
-          secretStringTemplate: JSON.stringify({ username: "postgres" }),
-          generateStringKey: 'password',
           excludeCharacters: "\'\"@/\\",
           passwordLength: 16
         }});
@@ -32,14 +31,17 @@ export class StorageStack extends cdk.Stack {
         // ********************************
         // S3 DICOM Image store bucket definition
         // ********************************   
-        const targetKmsKey = new kms.Key(this, 'MyTargetKey', {
-          trustAccountIdentities: true  // delegate key permissions to IAM
+        const bucketKmsKey = new kms.Key(this, 'OrthancBucketKey', {
+          trustAccountIdentities: true,  // delegate key permissions to IAM
+          enableKeyRotation: true
         });
     
         this.orthancBucket = new s3.Bucket(this, 'OrthancBucket', {
             bucketName: cdk.PhysicalName.GENERATE_IF_NEEDED,
             encryption: s3.BucketEncryption.KMS,
-            encryptionKey: targetKmsKey,
+            encryptionKey: bucketKmsKey,
+            blockPublicAccess:s3.BlockPublicAccess.BLOCK_ALL,
+            enforceSSL: true,
             removalPolicy: cdk.RemovalPolicy.DESTROY,
             autoDeleteObjects: true,
             versioned: true,
@@ -55,41 +57,67 @@ export class StorageStack extends cdk.Stack {
               },
             ],
         });
+        //TODO: add bucket policy
       }
       else { // If S3 is disabled, fall back to standard EFS storage
         // ********************************
         // EFS FileSystem configuration
         // ********************************
+        const efsKmsKey = new kms.Key(this, 'OrthancEFSKey', {
+          trustAccountIdentities: true,  // delegate key permissions to IAM
+          enableKeyRotation: true
+        });
+
         this.fileSystem = new FileSystem(this, 'OrthancFileSystem', {
           vpc: props.vpc,
           securityGroup: props.efsSecurityGroup,
           lifecyclePolicy: LifecyclePolicy.AFTER_14_DAYS, // files are not transitioned to infrequent access (IA) storage by default
           performanceMode: PerformanceMode.GENERAL_PURPOSE, // default
           throughputMode: ThroughputMode.BURSTING,
+          encrypted: true,
+          removalPolicy: cdk.RemovalPolicy.DESTROY,
+          kmsKey: efsKmsKey
         });
 
-        this.fileSystem.addAccessPoint('NFSAccessPoint',{
-            posixUser: {
-                gid: "0",
-                uid: "0"
+        this.efsAccessPoint = this.fileSystem.addAccessPoint('NFSAccessPoint',{
+            createAcl: {
+              ownerGid: "433",
+              ownerUid: "431",
+              permissions: "755"
             },
-            path: "/" 
+            posixUser: {
+                gid: "433",
+                uid: "431"
+            },
+            path: "/orthanc" 
         });
       }
       // ********************************
       // RDS Instance configuration
-      // ********************************         
+      // ********************************   
+      const rdsKmsKey = new kms.Key(this, 'OrthancRDSKey', {
+        trustAccountIdentities: true,  // delegate key permissions to IAM
+        enableKeyRotation: true
+      });
+      
       this.rdsInstance = new rds.DatabaseInstance(this, 'orthanc-instance', {
         engine: rds.DatabaseInstanceEngine.postgres({
             version: rds.PostgresEngineVersion.VER_11
         }),
+        multiAz: props.enable_multi_az,
+        deletionProtection: false,
         databaseName: "OrthancDB",
         storageType: rds.StorageType.GP2,
         storageEncrypted: true,
+        storageEncryptionKey: rdsKmsKey,
         allocatedStorage: 20,
+        backupRetention: props.enable_rds_backup ? cdk.Duration.days(30) : cdk.Duration.days(0),
         instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE3, ec2.InstanceSize.MEDIUM),
-        credentials: rds.Credentials.fromSecret(this.secret),
+        credentials: rds.Credentials.fromPassword("postgres", this.rdsSecret.secretValue ),
         vpc: props.vpc,
+        vpcSubnets: {
+          subnetType: ec2.SubnetType.PRIVATE_WITH_NAT
+        },
         securityGroups: [props.dbClusterSecurityGroup]
       });
   };
@@ -100,4 +128,6 @@ interface StorageStackProps extends cdk.StackProps {
   dbClusterSecurityGroup: ec2.SecurityGroup;
   efsSecurityGroup: ec2.SecurityGroup;
   enable_dicom_s3_storage: boolean;
+  enable_multi_az: boolean;
+  enable_rds_backup: boolean;
 }

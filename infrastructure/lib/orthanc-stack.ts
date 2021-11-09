@@ -11,18 +11,30 @@ import * as ec2 from "@aws-cdk/aws-ec2";
 import * as secretsmanager from '@aws-cdk/aws-secretsmanager';
 import { ContainerDefinition, FargatePlatformVersion, LinuxParameters, Protocol } from '@aws-cdk/aws-ecs';
 import { Aws } from '@aws-cdk/core';
-import { FileSystem } from "@aws-cdk/aws-efs";
+import { FileSystem, AccessPoint } from "@aws-cdk/aws-efs";
 import * as rds from '@aws-cdk/aws-rds';
 
 export class OrthancStack extends cdk.Stack {
 
   constructor(scope: cdk.Construct, id: string, props: OrthancStackProps) {
     super(scope, id, props);
+
+      // ********************************
+      // Orthanc Credentials (Secrets Manager)
+      // ********************************
+      const orthancCredentials = new secretsmanager.Secret(this, 'Orthanc-Credentials',{
+        generateSecretString: {
+          secretStringTemplate: JSON.stringify({}),
+          generateStringKey: 'admin',
+          excludeCharacters: "\'\"@/\\",
+          passwordLength: 16
+        }});
+
       // ********************************
       // ECS Fargate Cluster & ALB & Task definition
       // ********************************      
       const cluster = new ecs.Cluster(this, "OrthancCluster", {
-        vpc: props.vpc
+        vpc: props.vpc,
       });
 
       // create a task definition with CloudWatch Logs
@@ -52,20 +64,24 @@ export class OrthancStack extends cdk.Stack {
         taskDefinition: taskDef,
         environment: {
             ORTHANC__POSTGRESQL__HOST: props.rdsInstance.dbInstanceEndpointAddress,
-            ORTHANC__POSTGRESQL__PORT: props.rdsInstance.dbInstanceEndpointPort,
-            ORTHANC__POSTGRESQL__USERNAME: props.secret.secretValueFromJson('username').toString(),
-            ORTHANC__POSTGRESQL__PASSWORD: props.secret.secretValueFromJson("password").toString(),
+            ORTHANC__POSTGRESQL__PORT: props.rdsInstance.dbInstanceEndpointPort,     
             LOCALDOMAIN: Aws.REGION + ".compute.internal-orthanconaws.local",
-            ORTHANC__REGISTERED_USERS: "{\"" + props.orthancUserName + "\":\"" + props.orthancPassword + "\"}",
             DICOM_WEB_PLUGIN_ENABLED: "true",
-            VERBOSE_STARTUP: "true",
-            VERBOSE_ENABLED: "true",
-            TRACE_ENABLED: "true",
+            ORTHANC__POSTGRESQL__USERNAME: "postgres",
+            //VERBOSE_STARTUP: "true",      // uncomment to enable verbose logging in container
+            //VERBOSE_ENABLED: "true",      // uncomment to enable verbose logging in container
+            //TRACE_ENABLED: "true",        // uncomment to enable trace level logging in container
             STONE_WEB_VIEWER_PLUGIN_ENABLED: "true",
             STORAGE_BUNDLE_DEFAULTS: "false",
             LD_LIBRARY_PATH: "/usr/local/lib",
             WSI_PLUGIN_ENABLED: "true",
-            ORTHANC_JSON: props.enable_dicom_s3_storage ? JSON.stringify(orthancConfig) : "{}"
+            ORTHANC_JSON: props.enable_dicom_s3_storage ? JSON.stringify(orthancConfig) : "{}",
+            // If we disabled S3, remove the plugin so it won't cause issues at startup
+            BEFORE_ORTHANC_STARTUP_SCRIPT: props.enable_dicom_s3_storage ? "" : "/tmp/custom-script.sh"
+        },
+        secrets: {
+            ORTHANC__REGISTERED_USERS: ecs.Secret.fromSecretsManager(orthancCredentials),
+            ORTHANC__POSTGRESQL__PASSWORD: ecs.Secret.fromSecretsManager(props.secret)
         },
         linuxParameters: new LinuxParameters(this, "OrthancLinuxParams", { initProcessEnabled: true}),
         containerName: "orthanc-container",
@@ -85,18 +101,20 @@ export class OrthancStack extends cdk.Stack {
       };
 
       const orthancContainerDefinition: ContainerDefinition = taskDef.addContainer("OrthancContainer", container);
+      orthancCredentials.grantRead(orthancContainerDefinition.taskDefinition.taskRole);
+      props.secret.grantRead(orthancContainerDefinition.taskDefinition.taskRole);
 
       if(props.enable_dicom_s3_storage) { // If S3 DICOM storage is enabled, add neccessary permissions to bucket
         props.orthancBucket?.grantReadWrite(taskDef.taskRole); 
       }
       else { // If S3 DICOM storage is disabled, fall back to EFS - add volume and mount points
-        const volume = {
+        const volume: ecs.Volume = {
           name: "orthanc-efs",
           efsVolumeConfiguration: {
             fileSystemId: props.orthancFileSystem?.fileSystemId ? props.orthancFileSystem?.fileSystemId : "",
             transitEncryption: "ENABLED",
             authorizationConfig: {
-                accesspointId: "NHSAccessPoint",
+                accessPointId: props.efsAccessPoint?.accessPointId,
                 iam: "ENABLED"
             }
           }
@@ -115,13 +133,18 @@ export class OrthancStack extends cdk.Stack {
       const loadBalancer = new elbv2.ApplicationLoadBalancer(this, "OrthancLoadBalancer", {
         vpc: props.vpc,
         securityGroup: props.loadBalancerSecurityGroup,
-        internetFacing: true
+        internetFacing: true,
       });
+
+      if(props.access_logs_bucket_arn != "") {
+        loadBalancer.logAccessLogs(s3.Bucket.fromBucketArn(this, "MyAccessLogBucket", props.access_logs_bucket_arn));
+      }
 
       const fargateService = new ecs_patterns.ApplicationLoadBalancedFargateService(this, "OrthancService", {
         cluster,
         loadBalancer: loadBalancer,
         taskDefinition: taskDef,
+        desiredCount: props.enable_multi_az ? 2 : 1,
         platformVersion: FargatePlatformVersion.VERSION1_4,
         securityGroups: [props.ecsSecurityGroup]
       });
@@ -143,13 +166,28 @@ export class OrthancStack extends cdk.Stack {
         queryStringBehavior: cloudfront.OriginRequestQueryStringBehavior.all(),
       });
 
-      new cloudfront.Distribution(this, 'OrthancDistribution', {
+      const orthancDistribution = new cloudfront.Distribution(this, 'OrthancDistribution', {
         defaultBehavior: { 
           origin: new origins.LoadBalancerV2Origin(loadBalancer, { protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY }),
           originRequestPolicy: myOriginRequestPolicy,
           cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-          allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL
-        }
+          allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+        },
+        minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2019
+      });
+
+      // ********************************
+      // Stack Outputs
+      // ********************************  
+      new cdk.CfnOutput(this, 'OrthancCredentialsName', {
+        value: orthancCredentials.secretName,
+        description: 'The name of the OrthancCredentials secret',
+        exportName: 'orthancCredentialsName',
+      });
+      new cdk.CfnOutput(this, 'OrthancURL', {
+        value: orthancDistribution.distributionDomainName,
+        description: 'Orthanc Distribution URL',
+        exportName: 'orthancDistributionURL',
       });
   };
 }
@@ -162,7 +200,8 @@ interface OrthancStackProps extends cdk.StackProps {
   secret: secretsmanager.Secret;
   ecsSecurityGroup: ec2.SecurityGroup;
   loadBalancerSecurityGroup: ec2.SecurityGroup;
-  orthancUserName: String;
-  orthancPassword: String;
   enable_dicom_s3_storage: Boolean;
+  enable_multi_az: Boolean;
+  access_logs_bucket_arn: string;
+  efsAccessPoint?: AccessPoint;
 }
