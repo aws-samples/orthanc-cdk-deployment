@@ -109,6 +109,9 @@ Enjoy!
 ### TLS termination
 The solution supports TLS termination at the CloudFront distribution. However, the Application Load Balancer is listening on HTTP - which should be changed to an HTTPS listener (with a signed certificate) for production workloads. Please refer to the [documentation](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/create-https-listener.html) for guidance.
 
+### Database Secret rotation
+By default this solution does NOT rotate the database credentials. The credentials can be rotated manually, followed by a restart of the Fargate tasks.
+
 ## Found an issue? Anything to add?
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
 
