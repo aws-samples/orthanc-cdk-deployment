@@ -1,17 +1,39 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 FROM osimis/orthanc:21.11.0 as build
-RUN apt-get -y update
-RUN apt-get install -y git mercurial build-essential unzip cmake libcrypto++-dev wget
+
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    DEBIAN_FRONTEND="noninteractive" TZ="America/Los_Angeles" && \
+    apt-get install -y git wget curl zip unzip tar mercurial cmake build-essential libcrypto++-dev g++ zlib1g-dev libssl-dev libcurl4-openssl-dev
+
+# Prepare and install Orthanc S3 plugin dependencies
+RUN git clone https://github.com/microsoft/vcpkg
+RUN ./vcpkg/bootstrap-vcpkg.sh && ./vcpkg/vcpkg install cryptopp
+
+RUN mkdir /aws
+WORKDIR /aws
+RUN git clone --recurse-submodules https://github.com/aws/aws-sdk-cpp
+
+RUN mkdir -p /aws/builds/aws-sdk-cpp
+WORKDIR /aws/builds/aws-sdk-cpp
+RUN cmake -DBUILD_ONLY="s3;transfer" /aws/aws-sdk-cpp 
+RUN make -j 4 
+RUN make install
+
+# Build Orthanc S3 plugin
 WORKDIR /tmp
 RUN hg clone https://hg.orthanc-server.com/orthanc-object-storage/ -b default
 WORKDIR /tmp/build
-RUN cmake -DSTATIC_BUILD=ON -DCMAKE_BUILD_TYPE=Release -DUSE_VCPKG_PACKAGES=OFF -DUSE_SYSTEM_GOOGLE_TEST=OFF ../orthanc-object-storage/Aws
+RUN apt-get install -y libjsoncpp-dev uuid-dev e2fsprogs libboost-all-dev
+RUN cmake -DCMAKE_POLICY_DEFAULT_CMP0057=NEW -DCMAKE_TOOLCHAIN_FILE=/vcpkg/scripts/buildsystems/vcpkg.cmake -DUSE_SYSTEM_GOOGLE_TEST=OFF ../orthanc-object-storage/Aws
 RUN CORES=`grep -c ^processor /proc/cpuinfo` && make -j$CORES
 
 FROM osimis/orthanc:21.11.0 as release
 # Get compiled S3 plugin binary from build stage
 COPY --from=build /tmp/build/libOrthancAwsS3Storage.so /usr/share/orthanc/plugins/
+COPY --from=build /usr/local/lib/libaws-cpp-sdk-*.so /usr/local/lib/
+
 # Update OS packages
 RUN apt-get -y update 
 RUN DEBIAN_FRONTEND=noninteractive apt-get -y upgrade
