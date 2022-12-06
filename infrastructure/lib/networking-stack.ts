@@ -1,34 +1,34 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
-import * as cdk from '@aws-cdk/core';
-import * as ec2 from "@aws-cdk/aws-ec2";
-import * as logs from "@aws-cdk/aws-logs";
-import { Peer, Port, SecurityGroup } from '@aws-cdk/aws-ec2';
+import { App, Stack, StackProps } from 'aws-cdk-lib'; 
+import { FlowLogDestination, FlowLogTrafficType, Peer, Port, SecurityGroup, Vpc } from 'aws-cdk-lib/aws-ec2';
+import { LogGroup } from 'aws-cdk-lib/aws-logs';
+import { Construct } from 'constructs';
 
-export class NetworkStack extends cdk.Stack {
+export class NetworkStack extends Stack {
 
-  readonly vpc: ec2.Vpc;
-  readonly ecsSecurityGroup: ec2.SecurityGroup;
-  readonly dbClusterSecurityGroup: ec2.SecurityGroup;
-  readonly efsSecurityGroup: ec2.SecurityGroup;
-  readonly loadBalancerSecurityGroup: ec2.SecurityGroup;
+  readonly vpc: Vpc;
+  readonly ecsSecurityGroup: SecurityGroup;
+  readonly dbClusterSecurityGroup: SecurityGroup;
+  readonly efsSecurityGroup: SecurityGroup;
+  readonly loadBalancerSecurityGroup: SecurityGroup;
 
-  constructor(scope: cdk.Construct, id: string, props: NetworkStackProps) {
+  constructor(scope: Construct, id: string, props: NetworkStackProps) {
     super(scope, id, props);
       // ********************************
       // VPC configuration
       // ********************************
-      this.vpc = new ec2.Vpc(this, "OrthancVpc", {
+      this.vpc = new Vpc(this, "OrthancVpc", {
         maxAzs: 2, // Default is all AZs in region
       });
 
       if(props.enable_vpc_flow_logs) {
-        const cwLogs = new logs.LogGroup(this, 'Log', {
+        const cwLogs = new LogGroup(this, 'Log', {
           logGroupName: '/aws/vpc/flowlogs',
         });  
         this.vpc.addFlowLog("OrthancVPCFlowLogs",{
-          destination: ec2.FlowLogDestination.toCloudWatchLogs(cwLogs),
-          trafficType: ec2.FlowLogTrafficType.ALL
+          destination: FlowLogDestination.toCloudWatchLogs(cwLogs),
+          trafficType: FlowLogTrafficType.ALL
         });
       }
       // ********************************
@@ -51,6 +51,6 @@ export class NetworkStack extends cdk.Stack {
   };
 }
 
-interface NetworkStackProps extends cdk.StackProps {
+interface NetworkStackProps extends StackProps {
   enable_vpc_flow_logs: Boolean;
 }

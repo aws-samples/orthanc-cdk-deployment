@@ -2,7 +2,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 import 'source-map-support/register';
-import * as cdk from '@aws-cdk/core';
+import { App, Stack } from 'aws-cdk-lib';                
 import { OrthancStack } from '../lib/orthanc-stack';
 import { NetworkStack } from '../lib/networking-stack';
 import { StorageStack } from '../lib/storage-stack';
@@ -19,7 +19,7 @@ const ENABLE_VPC_FLOW_LOGS = false;       // If true, enables VPC flow logs to C
 // ********************************
 // App & Stack configuration
 // ********************************   
-const app = new cdk.App();
+const app = new App();
 const networkStack = new NetworkStack(app, 'Orthanc-Network', {
   env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },
   enable_vpc_flow_logs: ENABLE_VPC_FLOW_LOGS

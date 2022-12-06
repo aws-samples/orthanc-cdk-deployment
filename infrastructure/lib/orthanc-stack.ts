@@ -1,22 +1,22 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
-import * as cdk from '@aws-cdk/core';
-import * as cloudfront from '@aws-cdk/aws-cloudfront';
-import * as origins from '@aws-cdk/aws-cloudfront-origins';
-import * as ecs from "@aws-cdk/aws-ecs";
-import * as elbv2 from "@aws-cdk/aws-elasticloadbalancingv2";
-import * as ecs_patterns from "@aws-cdk/aws-ecs-patterns";
-import * as s3 from '@aws-cdk/aws-s3';
-import * as ec2 from "@aws-cdk/aws-ec2";
-import * as secretsmanager from '@aws-cdk/aws-secretsmanager';
-import { ContainerDefinition, FargatePlatformVersion, LinuxParameters, Protocol } from '@aws-cdk/aws-ecs';
-import { Aws } from '@aws-cdk/core';
-import { FileSystem, AccessPoint } from "@aws-cdk/aws-efs";
-import * as rds from '@aws-cdk/aws-rds';
 
-export class OrthancStack extends cdk.Stack {
+import { Aws, CfnOutput, Duration, Stack, StackProps } from "aws-cdk-lib";
+import { AllowedMethods, CachePolicy, Distribution, OriginProtocolPolicy, OriginRequestCookieBehavior, OriginRequestHeaderBehavior, OriginRequestPolicy, OriginRequestQueryStringBehavior, SecurityPolicyProtocol } from "aws-cdk-lib/aws-cloudfront";
+import { LoadBalancerV2Origin } from "aws-cdk-lib/aws-cloudfront-origins";
+import { IVpc, SecurityGroup } from "aws-cdk-lib/aws-ec2";
+import { AwsLogDriver, Cluster, ContainerDefinition, ContainerImage, FargatePlatformVersion, FargateTaskDefinition, LinuxParameters, Protocol, Secret, Volume } from "aws-cdk-lib/aws-ecs";
+import { ApplicationLoadBalancedFargateService } from "aws-cdk-lib/aws-ecs-patterns";
+import { AccessPoint, FileSystem } from "aws-cdk-lib/aws-efs";
+import { ApplicationLoadBalancer } from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import { DatabaseInstance } from "aws-cdk-lib/aws-rds";
+import { Bucket } from "aws-cdk-lib/aws-s3";
+import { Construct } from "constructs";
+import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 
-  constructor(scope: cdk.Construct, id: string, props: OrthancStackProps) {
+export class OrthancStack extends Stack {
+
+  constructor(scope: Construct, id: string, props: OrthancStackProps) {
     super(scope, id, props);
 
       // ********************************
@@ -33,16 +33,16 @@ export class OrthancStack extends cdk.Stack {
       // ********************************
       // ECS Fargate Cluster & ALB & Task definition
       // ********************************      
-      const cluster = new ecs.Cluster(this, "OrthancCluster", {
+      const cluster = new Cluster(this, "OrthancCluster", {
         vpc: props.vpc,
       });
 
       // create a task definition with CloudWatch Logs
-      const logging = new ecs.AwsLogDriver({
+      const logging = new AwsLogDriver({
         streamPrefix: "orthanc",
       });
   
-      const taskDef = new ecs.FargateTaskDefinition(this, "OrthancTaskDefinition", {
+      const taskDef = new FargateTaskDefinition(this, "OrthancTaskDefinition", {
         memoryLimitMiB: 4096,
         cpu: 2048,
       });
@@ -59,7 +59,7 @@ export class OrthancStack extends cdk.Stack {
         };
       
       let container = {
-        image: ecs.ContainerImage.fromAsset('./lib/local-image-official-s3/'),
+        image: ContainerImage.fromAsset('./lib/local-image-official-s3/'),
         logging,
         taskDefinition: taskDef,
         environment: {
@@ -80,8 +80,8 @@ export class OrthancStack extends cdk.Stack {
             BEFORE_ORTHANC_STARTUP_SCRIPT: props.enable_dicom_s3_storage ? "" : "/tmp/custom-script.sh"
         },
         secrets: {
-            ORTHANC__REGISTERED_USERS: ecs.Secret.fromSecretsManager(orthancCredentials),
-            ORTHANC__POSTGRESQL__PASSWORD: ecs.Secret.fromSecretsManager(props.secret)
+            ORTHANC__REGISTERED_USERS: Secret.fromSecretsManager(orthancCredentials),
+            ORTHANC__POSTGRESQL__PASSWORD: Secret.fromSecretsManager(props.secret)
         },
         linuxParameters: new LinuxParameters(this, "OrthancLinuxParams", { initProcessEnabled: true}),
         containerName: "orthanc-container",
@@ -108,7 +108,7 @@ export class OrthancStack extends cdk.Stack {
         props.orthancBucket?.grantReadWrite(taskDef.taskRole); 
       }
       else { // If S3 DICOM storage is disabled, fall back to EFS - add volume and mount points
-        const volume: ecs.Volume = {
+        const volume: Volume = {
           name: "orthanc-efs",
           efsVolumeConfiguration: {
             fileSystemId: props.orthancFileSystem?.fileSystemId ? props.orthancFileSystem?.fileSystemId : "",
@@ -130,17 +130,17 @@ export class OrthancStack extends cdk.Stack {
         taskDef.addVolume(volume);
       }
       
-      const loadBalancer = new elbv2.ApplicationLoadBalancer(this, "OrthancLoadBalancer", {
+      const loadBalancer = new ApplicationLoadBalancer(this, "OrthancLoadBalancer", {
         vpc: props.vpc,
         securityGroup: props.loadBalancerSecurityGroup,
         internetFacing: true,
       });
 
       if(props.access_logs_bucket_arn != "") {
-        loadBalancer.logAccessLogs(s3.Bucket.fromBucketArn(this, "MyAccessLogBucket", props.access_logs_bucket_arn));
+        loadBalancer.logAccessLogs(Bucket.fromBucketArn(this, "MyAccessLogBucket", props.access_logs_bucket_arn));
       }
 
-      const fargateService = new ecs_patterns.ApplicationLoadBalancedFargateService(this, "OrthancService", {
+      const fargateService = new ApplicationLoadBalancedFargateService(this, "OrthancService", {
         cluster,
         loadBalancer: loadBalancer,
         taskDefinition: taskDef,
@@ -151,40 +151,40 @@ export class OrthancStack extends cdk.Stack {
 
       fargateService.targetGroup.configureHealthCheck({
         path: "/",
-        interval: cdk.Duration.seconds(60),
+        interval: Duration.seconds(60),
         healthyHttpCodes:"200-499", // We have to check for 401 as the default state of "/" is unauthenticated
       });
 
       // ********************************
       // Cloudfront Distribution
       // ********************************    
-      const myOriginRequestPolicy = new cloudfront.OriginRequestPolicy(this, 'OriginRequestPolicy', {
+      const myOriginRequestPolicy = new OriginRequestPolicy(this, 'OriginRequestPolicy', {
         originRequestPolicyName: 'OrthancPolicy',
         comment: 'Policy optimised for Orthanc',
-        cookieBehavior: cloudfront.OriginRequestCookieBehavior.all(),
-        headerBehavior: cloudfront.OriginRequestHeaderBehavior.all(),
-        queryStringBehavior: cloudfront.OriginRequestQueryStringBehavior.all(),
+        cookieBehavior: OriginRequestCookieBehavior.all(),
+        headerBehavior: OriginRequestHeaderBehavior.all(),
+        queryStringBehavior: OriginRequestQueryStringBehavior.all(),
       });
 
-      const orthancDistribution = new cloudfront.Distribution(this, 'OrthancDistribution', {
+      const orthancDistribution = new Distribution(this, 'OrthancDistribution', {
         defaultBehavior: { 
-          origin: new origins.LoadBalancerV2Origin(loadBalancer, { protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY }),
+          origin: new LoadBalancerV2Origin(loadBalancer, { protocolPolicy: OriginProtocolPolicy.HTTP_ONLY }),
           originRequestPolicy: myOriginRequestPolicy,
-          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-          allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+          cachePolicy: CachePolicy.CACHING_DISABLED,
+          allowedMethods: AllowedMethods.ALLOW_ALL,
         },
-        minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2019
+        minimumProtocolVersion: SecurityPolicyProtocol.TLS_V1_2_2019
       });
 
       // ********************************
       // Stack Outputs
       // ********************************  
-      new cdk.CfnOutput(this, 'OrthancCredentialsName', {
+      new CfnOutput(this, 'OrthancCredentialsName', {
         value: orthancCredentials.secretName,
         description: 'The name of the OrthancCredentials secret',
         exportName: 'orthancCredentialsName',
       });
-      new cdk.CfnOutput(this, 'OrthancURL', {
+      new CfnOutput(this, 'OrthancURL', {
         value: orthancDistribution.distributionDomainName,
         description: 'Orthanc Distribution URL',
         exportName: 'orthancDistributionURL',
@@ -192,14 +192,14 @@ export class OrthancStack extends cdk.Stack {
   };
 }
 
-interface OrthancStackProps extends cdk.StackProps {
-  vpc: ec2.IVpc;
-  orthancBucket?: s3.Bucket;
+interface OrthancStackProps extends StackProps {
+  vpc: IVpc;
+  orthancBucket?: Bucket;
   orthancFileSystem?: FileSystem;
-  rdsInstance: rds.DatabaseInstance;
+  rdsInstance: DatabaseInstance;
   secret: secretsmanager.Secret;
-  ecsSecurityGroup: ec2.SecurityGroup;
-  loadBalancerSecurityGroup: ec2.SecurityGroup;
+  ecsSecurityGroup: SecurityGroup;
+  loadBalancerSecurityGroup: SecurityGroup;
   enable_dicom_s3_storage: Boolean;
   enable_multi_az: Boolean;
   access_logs_bucket_arn: string;
