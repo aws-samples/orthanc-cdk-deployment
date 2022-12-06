@@ -5,7 +5,7 @@ FROM osimis/orthanc:21.11.0 as build
 RUN apt-get update && \
     apt-get upgrade -y && \
     DEBIAN_FRONTEND="noninteractive" TZ="America/Los_Angeles" && \
-    apt-get install -y git wget curl zip unzip tar mercurial cmake build-essential libcrypto++-dev g++ zlib1g-dev libssl-dev libcurl4-openssl-dev
+    apt-get install -y git wget curl zip unzip tar mercurial cmake build-essential libcrypto++-dev g++ zlib1g-dev libssl-dev libcurl4-openssl-dev pkg-config
 
 # Prepare and install Orthanc S3 plugin dependencies
 RUN git clone https://github.com/microsoft/vcpkg
@@ -23,7 +23,8 @@ RUN make install
 
 # Build Orthanc S3 plugin
 WORKDIR /tmp
-RUN hg clone https://hg.orthanc-server.com/orthanc-object-storage/ -b default
+RUN hg clone https://hg.orthanc-server.com/orthanc-object-storage/ -r 7bf31db5497e
+COPY CMakeLists.txt /tmp/orthanc-object-storage/Aws
 WORKDIR /tmp/build
 RUN apt-get install -y libjsoncpp-dev uuid-dev e2fsprogs libboost-all-dev
 RUN cmake -DCMAKE_POLICY_DEFAULT_CMP0057=NEW -DCMAKE_TOOLCHAIN_FILE=/vcpkg/scripts/buildsystems/vcpkg.cmake -DUSE_SYSTEM_GOOGLE_TEST=OFF ../orthanc-object-storage/Aws

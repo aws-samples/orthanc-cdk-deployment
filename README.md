@@ -17,6 +17,10 @@ Orthanc is an open-source DICOM server, which is designed to improve the DICOM f
 - [x] Secure HTTPS connection using Cloudfront
 - [x] Automatic build of the official S3 plugin using a multi-stage Docker image file
 
+## Changelog
+- 06.12.2022
+  - Upgraded to CDK v2
+  - Applied a patch to the s3 object storage plugin in the dockerfile to fix the broken build
 
 ## Project structure
     

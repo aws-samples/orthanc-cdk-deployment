@@ -12,3 +12,5 @@ infrastucture/Orthanc-Network
 # CDK asset staging directory
 .cdk.staging
 cdk.out
+
+./../tmp
