@@ -18,6 +18,10 @@ Orthanc is an open-source DICOM server, which is designed to improve the DICOM f
 - [x] Automatic build of the official S3 plugin using a multi-stage Docker image file
 
 ## Changelog
+- 05.09.2024
+  - Upgraded CDK to latest available version
+  - Switched to the official Orthanc docker image (that includes the precompiled S3 plugin)
+  - Upgraded PostgreSQL version to v15
 - 06.12.2022
   - Upgraded to CDK v2
   - Applied a patch to the s3 object storage plugin in the dockerfile to fix the broken build
