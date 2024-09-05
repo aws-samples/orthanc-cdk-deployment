@@ -15,6 +15,10 @@ RUN mkdir /aws
 WORKDIR /aws
 RUN git clone --recurse-submodules https://github.com/aws/aws-sdk-cpp
 
+WORKDIR /aws/aws-sdk-cpp
+RUN git reset --hard f124edc826a883b9814e51f70162812f7eb27516
+
+WORKDIR /aws
 RUN mkdir -p /aws/builds/aws-sdk-cpp
 WORKDIR /aws/builds/aws-sdk-cpp
 RUN cmake -DBUILD_ONLY="s3;transfer" /aws/aws-sdk-cpp 
