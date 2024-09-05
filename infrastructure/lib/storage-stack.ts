@@ -100,7 +100,7 @@ export class StorageStack extends Stack {
       
       this.rdsInstance = new DatabaseInstance(this, 'orthanc-instance', {
         engine: DatabaseInstanceEngine.postgres({
-            version: PostgresEngineVersion.VER_11
+            version: PostgresEngineVersion.VER_15
         }),
         multiAz: props.enable_multi_az,
         deletionProtection: false,

@@ -79,39 +79,43 @@ export class OrthancStack extends Stack {
     let orthancConfig = {
       AwsS3Storage: {
         BucketName: props.orthancBucket?.bucketName,
-        Region: Aws.REGION,
-        ConnectionTimeout: 30,
-        RequestTimeout: 1200,
-        RootPath: "",
-        StorageStructure: "flat",
-        MigrationFromFileSystemEnabled: false,
+        Region: Aws.REGION
       },
+      PostgreSQL: {
+        EnableIndex: true,
+        EnableStorage: false,
+        Port: +props.rdsInstance.dbInstanceEndpointPort,
+        Host: props.rdsInstance.dbInstanceEndpointAddress,
+        Database: "postgres",
+        Username: "postgres",
+        Password: Secret.fromSecretsManager(props.secret),
+        EnableSsl: true,
+        Lock: false
+      }
     };
 
     let container = {
-      image: ContainerImage.fromAsset("./lib/local-image-official-s3/"),
+      image: ContainerImage.fromRegistry("orthancteam/orthanc:24.8.3-full"),
       logging,
       taskDefinition: taskDef,
       environment: {
-        ORTHANC__POSTGRESQL__HOST: props.rdsInstance.dbInstanceEndpointAddress,
-        ORTHANC__POSTGRESQL__PORT: props.rdsInstance.dbInstanceEndpointPort,
-        LOCALDOMAIN: Aws.REGION + ".compute.internal-orthanconaws.local",
         DICOM_WEB_PLUGIN_ENABLED: "true",
-        ORTHANC__POSTGRESQL__USERNAME: "postgres",
+        ORTHANC_WEB_VIEWER_PLUGIN_ENABLED: "true",
+        STONE_WEB_VIEWER_PLUGIN_ENABLED: "true",
+        AWS_S3_STORAGE_PLUGIN_ENABLED: "true",
+        POSTGRESQL_PLUGIN_ENABLED: "true",
+        WSI_PLUGIN_ENABLED: "true",
+        LOCALDOMAIN: Aws.REGION + ".compute.internal-orthanconaws.local",
         //VERBOSE_STARTUP: "true",      // uncomment to enable verbose logging in container
         //VERBOSE_ENABLED: "true",      // uncomment to enable verbose logging in container
         //TRACE_ENABLED: "true",        // uncomment to enable trace level logging in container
-        STONE_WEB_VIEWER_PLUGIN_ENABLED: "true",
         STORAGE_BUNDLE_DEFAULTS: "false",
         LD_LIBRARY_PATH: "/usr/local/lib",
-        WSI_PLUGIN_ENABLED: "true",
-        ORTHANC_JSON: props.enable_dicom_s3_storage
-          ? JSON.stringify(orthancConfig)
-          : "{}",
+        ORTHANC_JSON: JSON.stringify(orthancConfig),
         // If we disabled S3, remove the plugin so it won't cause issues at startup
-        BEFORE_ORTHANC_STARTUP_SCRIPT: props.enable_dicom_s3_storage
-          ? ""
-          : "/tmp/custom-script.sh",
+        //BEFORE_ORTHANC_STARTUP_SCRIPT: props.enable_dicom_s3_storage
+        //  ? ""
+        //  : "/tmp/custom-script.sh",
       },
       secrets: {
         ORTHANC__REGISTERED_USERS:
