@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-import { Aws, CfnOutput, Duration, Stack, StackProps } from "aws-cdk-lib";
+import { Aws, CfnOutput, Duration, Stack, StackProps, Token } from "aws-cdk-lib";
 import {
   AllowedMethods,
   CachePolicy,
@@ -84,7 +84,7 @@ export class OrthancStack extends Stack {
       PostgreSQL: {
         EnableIndex: true,
         EnableStorage: false,
-        Port: +props.rdsInstance.dbInstanceEndpointPort,
+        Port: Token.asNumber(props.rdsInstance.dbInstanceEndpointPort),
         Host: props.rdsInstance.dbInstanceEndpointAddress,
         Database: "postgres",
         Username: "postgres",
