@@ -12,7 +12,7 @@
   "devDependencies": {
     "@types/jest": "^26.0.10",
     "@types/node": "10.17.27",
-    "aws-cdk-lib": "^2.177.0",
+    "aws-cdk-lib": "^2.184.0",
     "jest": "^29.7.0",
     "ts-jest": "^29.1.4",
     "ts-node": "^9.0.0",
@@ -20,7 +20,7 @@
     "constructs": "^10.3.0"
   },
   "dependencies": {
-    "aws-cdk-lib": "^2.177.0",
+    "aws-cdk-lib": "^2.184.0",
     "source-map-support": "^0.5.16",
     "constructs": "^10.3.0"
   }
