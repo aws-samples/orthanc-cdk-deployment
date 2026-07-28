@@ -95,7 +95,9 @@ export class OrthancStack extends Stack {
     };
 
     let container = {
-      image: ContainerImage.fromRegistry("orthancteam/orthanc:24.8.3-full"),
+      // Please uncomment this line to pull the docker image from the official orthanc repository
+      // Additionally, please make sure you run your security scanning software on the image 
+      // image: ContainerImage.fromRegistry("orthancteam/orthanc:24.8.3-full"),
       logging,
       taskDefinition: taskDef,
       environment: {
